@@ -10,11 +10,15 @@ export function Hero() {
             <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
               Portfolio X-ray · 사전 신청 진행 중
             </span>
-            <h1 className="text-4xl font-bold leading-tight tracking-tight text-zinc-900 md:text-5xl">
-              흩어진 증권 계좌를 한 눈에.
+            <h1 className="text-2xl font-bold leading-tight tracking-tight text-zinc-900 break-keep sm:text-3xl md:text-5xl">
+              흩어진 증권 계좌를
+              <br />
+              한 눈에.
               <br />
               <span className="text-emerald-700">
-                비중을 알면, 리밸런싱이 보입니다.
+                비중을 알면,
+                <br />
+                리밸런싱이 보입니다.
               </span>
             </h1>
             <p className="max-w-xl text-lg leading-relaxed text-zinc-600">
