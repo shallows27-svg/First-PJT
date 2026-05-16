@@ -28,14 +28,14 @@ export function Hero() {
             </p>
             <div className="flex flex-col gap-3 sm:flex-row">
               <a
-                href="#waitlist"
+                href="/signup"
                 className={buttonVariants({
                   variant: "default",
                   size: "lg",
                   className: "h-12 px-6 text-base",
                 })}
               >
-                사전 신청하기
+                무료로 시작하기
               </a>
               <a
                 href="#features"
