@@ -37,6 +37,7 @@ export function HoldingsReviewTable({
 }: Props) {
   const [items, setItems] = useState<HoldingItem[]>(initial);
   const itemsRef = useRef(items);
+  const consumedRef = useRef<HoldingItem[] | null | undefined>(null);
   const [flashKeys, setFlashKeys] = useState<Set<string>>(new Set());
   const [isSaving, startSaving] = useTransition();
 
@@ -48,20 +49,24 @@ export function HoldingsReviewTable({
   // 외부에서 들어온 새 분석 결과를 머지.
   useEffect(() => {
     if (!pendingMerge || pendingMerge.length === 0) return;
-    const prev = itemsRef.current;
-    const { merged, mergedCount } = mergeHoldings(prev, pendingMerge);
+    if (consumedRef.current === pendingMerge) return; // 이미 처리한 인스턴스 (Strict Mode 이중 실행 방지)
+    consumedRef.current = pendingMerge;
+
+    const { merged, mergedCount } = mergeHoldings(itemsRef.current, pendingMerge);
     if (mergedCount > 0) {
       toast.success(`${mergedCount}개 종목이 기존 항목과 합산되었습니다`);
     }
     // 플래시 표시할 키 = 새 incoming의 키들 중 prev에 이미 존재했던 것
-    const prevKeys = new Set(prev.map(rowKey));
+    const prevKeys = new Set(itemsRef.current.map(rowKey));
     const newlyFlashed = new Set(
       pendingMerge.map(rowKey).filter((k) => prevKeys.has(k)),
     );
     setItems(merged);
     setFlashKeys(newlyFlashed);
-    setTimeout(() => setFlashKeys(new Set()), 1500);
+    const t = setTimeout(() => setFlashKeys(new Set()), 1500);
     onMergeConsumed?.();
+
+    return () => clearTimeout(t);
   }, [pendingMerge, onMergeConsumed]);
 
   // 페이지 이탈 경고 (편집 중 + 저장 안 한 변경 보호).
