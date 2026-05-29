@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { MessageForm } from "@/components/dashboard/MessageForm";
 import { PortfolioSection } from "@/components/dashboard/PortfolioSection";
 import type { HoldingItem } from "@/lib/portfolio/schema";
+import { coerceHoldingItem } from "@/lib/portfolio/holdings";
 
 export const metadata = { title: "대시보드 — Portfolio X-ray" };
 
@@ -33,7 +34,13 @@ export default async function DashboardPage() {
     .eq("user_id", user.id)
     .maybeSingle();
 
-  const savedItems = (portfolioRow?.holdings_items ?? []) as HoldingItem[];
+  // 레거시 행(스키마 변경 전 저장 데이터)은 current_price 필드가 없으니 coerce에서 역산.
+  const rawItems = Array.isArray(portfolioRow?.holdings_items)
+    ? (portfolioRow.holdings_items as unknown[])
+    : [];
+  const savedItems: HoldingItem[] = rawItems
+    .map(coerceHoldingItem)
+    .filter((it): it is HoldingItem => it !== null);
   const savedSummary: string = portfolioRow?.ai_summary ?? "";
 
   return (

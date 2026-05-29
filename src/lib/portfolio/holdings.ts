@@ -1,5 +1,48 @@
 // src/lib/portfolio/holdings.ts
-import type { HoldingItem, Region } from "./schema";
+import type { HoldingItem, Region, VisionItem } from "./schema";
+
+// value_krw를 quantity × current_price로 항상 일관되게 채우는 단일 진입점.
+// 비전 응답·검수 편집·서버 저장 모든 경로가 이 함수를 통과해야 값이 drift하지 않는다.
+export function withComputedValue(item: HoldingItem | VisionItem): HoldingItem {
+  return {
+    ticker: item.ticker,
+    name: item.name,
+    quantity: item.quantity,
+    current_price: item.current_price,
+    region: item.region,
+    value_krw: item.quantity * item.current_price,
+  };
+}
+
+// DB에 저장된 레거시 데이터(스키마 변경 전)는 current_price 필드가 없다.
+// value_krw / quantity로 역산해 채워 넣는다. 새 데이터는 그대로 통과.
+export function coerceHoldingItem(raw: unknown): HoldingItem | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const quantity = typeof r.quantity === "number" ? r.quantity : 0;
+  const value_krw = typeof r.value_krw === "number" ? r.value_krw : 0;
+  const current_price =
+    typeof r.current_price === "number"
+      ? r.current_price
+      : quantity > 0
+        ? value_krw / quantity
+        : 0;
+  const ticker = typeof r.ticker === "string" ? r.ticker : null;
+  const name = typeof r.name === "string" ? r.name : "";
+  const region =
+    r.region === "US" || r.region === "GLOBAL" || r.region === "KR"
+      ? r.region
+      : "KR";
+  if (!name) return null;
+  return withComputedValue({
+    ticker,
+    name,
+    quantity,
+    current_price,
+    region,
+    value_krw,
+  });
+}
 
 function normalizeName(name: string): string {
   return name.trim().replace(/\s+/g, " ");
@@ -28,15 +71,18 @@ export function mergeHoldings(
     const key = mergeKey(item);
     const prev = map.get(key);
     if (prev) {
+      // 수량은 합산. current_price는 기존 값 우선 (동일 종목이면 가격이 같다는 가정).
+      // value_krw는 마지막에 withComputedValue로 일괄 재계산되므로 여기선 직접 안 건드림.
       prev.quantity += item.quantity;
-      prev.value_krw += item.value_krw;
       mergedCount += 1;
     } else {
       map.set(key, item);
     }
   }
 
-  return { merged: Array.from(map.values()), mergedCount };
+  // 합산이 발생한 항목은 value_krw를 다시 계산. 단일 항목도 일관성 위해 통과.
+  const merged = Array.from(map.values()).map(withComputedValue);
+  return { merged, mergedCount };
 }
 
 // LLM region 추정이 ticker 패턴과 명백히 충돌하면 보정.
