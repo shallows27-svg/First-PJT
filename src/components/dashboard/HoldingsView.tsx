@@ -14,6 +14,7 @@ export function HoldingsView({ items }: { items: HoldingItem[] }) {
           <tr>
             <th className="px-3 py-2">종목</th>
             <th className="px-3 py-2 text-right">수량</th>
+            <th className="px-3 py-2 text-right">현재가</th>
             <th className="px-3 py-2 text-right">평가금액</th>
             <th className="px-3 py-2 text-right">비중</th>
             <th className="px-3 py-2">지역</th>
@@ -36,6 +37,9 @@ export function HoldingsView({ items }: { items: HoldingItem[] }) {
                   {r.item.quantity}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-700">
+                  {formatKrw(r.item.current_price)}원
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-700">
                   {formatKrw(r.item.value_krw)}원
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-900">
@@ -49,7 +53,7 @@ export function HoldingsView({ items }: { items: HoldingItem[] }) {
         </tbody>
         <tfoot className="bg-zinc-50 text-xs font-semibold text-zinc-700">
           <tr>
-            <td className="px-3 py-2" colSpan={2}>
+            <td className="px-3 py-2" colSpan={3}>
               합계 ({items.length}개 종목)
             </td>
             <td className="px-3 py-2 text-right tabular-nums">
