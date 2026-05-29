@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { summarizePortfolio } from "@/lib/openrouter";
+import { summarizePortfolioFromItems } from "@/lib/ai/summary";
 import { extractHoldingsFromImages } from "@/lib/ai/vision";
 import {
   HoldingItemSchema,
@@ -218,6 +219,117 @@ export async function analyzeScreenshots(
   return { ok: true, items };
 }
 
-// 사용 안 하는 변수 lint 경고 회피용 reference.
-void HoldingItemSchema;
-void z;
+// ────────────────────────────────────────────────────────────────────────────
+// 신규: 저장 + 요약. DB write + ai_summary 생성.
+// ────────────────────────────────────────────────────────────────────────────
+
+export type SaveState = { ok: true } | { ok: false; error: string };
+
+const SAVE_DEBOUNCE_MS = 30_000;
+
+export async function savePortfolio(items: HoldingItem[]): Promise<SaveState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  // 방어적 재검증. client state는 신뢰 X.
+  let validated: HoldingItem[];
+  try {
+    const parsed = z.array(HoldingItemSchema).max(100).parse(items);
+    const corrected = parsed.map(correctRegion);
+    validated = mergeHoldings([], corrected).merged;
+  } catch {
+    return { ok: false, error: "보유종목 데이터가 올바르지 않습니다." };
+  }
+  if (validated.length === 0) {
+    return { ok: false, error: "저장할 보유종목이 없습니다." };
+  }
+
+  // 30초 디바운스: 직전 저장 후 짧은 시간 내 재호출 차단.
+  const { data: lastRow } = await supabase
+    .from("portfolios")
+    .select("updated_at")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (lastRow?.updated_at) {
+    const elapsed = Date.now() - new Date(lastRow.updated_at).getTime();
+    if (elapsed < SAVE_DEBOUNCE_MS) {
+      const wait = Math.ceil((SAVE_DEBOUNCE_MS - elapsed) / 1000);
+      return { ok: false, error: `잠시 후 다시 시도해주세요. (${wait}초)` };
+    }
+  }
+
+  // 요약 실패는 fatal 아님 — 빈 문자열로 저장 후 사용자가 [요약 다시 생성] 트리거.
+  let aiSummary = "";
+  try {
+    aiSummary = await summarizePortfolioFromItems(validated);
+  } catch (e) {
+    console.error("[savePortfolio] 요약 호출 실패:", e);
+  }
+
+  const { error } = await supabase.from("portfolios").upsert(
+    {
+      user_id: user.id,
+      holdings_items: validated,
+      ai_summary: aiSummary,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" },
+  );
+
+  if (error) {
+    return {
+      ok: false,
+      error: "저장에 실패했습니다. 잠시 후 다시 시도해주세요.",
+    };
+  }
+
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+// 사용자 수동 트리거: 요약만 다시 생성. holdings_items 는 건드리지 않음.
+export async function regenerateSummary(): Promise<SaveState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  const { data: row } = await supabase
+    .from("portfolios")
+    .select("holdings_items")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const items = (row?.holdings_items ?? []) as HoldingItem[];
+  if (items.length === 0) {
+    return { ok: false, error: "보유종목이 없습니다." };
+  }
+
+  let aiSummary: string;
+  try {
+    aiSummary = await summarizePortfolioFromItems(items);
+  } catch (e) {
+    console.error("[regenerateSummary] 요약 호출 실패:", e);
+    return {
+      ok: false,
+      error: "요약 생성에 실패했습니다. 잠시 후 다시 시도해주세요.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("portfolios")
+    .update({ ai_summary: aiSummary, updated_at: new Date().toISOString() })
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { ok: false, error: "저장에 실패했습니다." };
+  }
+
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
