@@ -4,6 +4,7 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { mergeHoldings } from "@/lib/portfolio/holdings";
 import type { HoldingItem } from "@/lib/portfolio/schema";
 import { analyzeScreenshots } from "@/app/dashboard/actions";
 import { ScreenshotUploader } from "./ScreenshotUploader";
@@ -137,7 +138,7 @@ function mergeWithSaved(
   saved: HoldingItem[],
   incoming: HoldingItem[],
 ): HoldingItem[] {
-  // [수정] 진입 직후 새 분석이 들어온 케이스. saved 위에 incoming 합산.
-  // 정식 머지 로직은 HoldingsReviewTable에서도 한 번 더 적용되므로 여기는 단순 concat.
-  return [...saved, ...incoming];
+  // saved 위에 새 분석 결과를 합산. 같은 종목은 quantity/value_krw가 더해지고,
+  // 사용자가 기존에 설정한 region/name은 보존된다.
+  return mergeHoldings(saved, incoming).merged;
 }
