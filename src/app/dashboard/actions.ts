@@ -49,6 +49,11 @@ export async function saveMessage(
 
 export type PortfolioState = { error: string } | null;
 
+// AI 호출 디바운스: 사용자당 직전 분석 이후 최소 간격(ms).
+// OpenRouter 비용 폭주 방지 목적의 1차 가드. 더 강한 보호가 필요하면
+// 별도 카운트 테이블이나 Vercel Runtime Cache로 일일 한도를 추가할 것.
+const ANALYZE_MIN_INTERVAL_MS = 10_000;
+
 export async function analyzePortfolio(
   _prev: PortfolioState,
   formData: FormData,
@@ -69,6 +74,22 @@ export async function analyzePortfolio(
   // 서버 액션은 폼 외에 직접 POST로도 호출될 수 있으므로 인증을 반드시 재확인.
   if (!user) {
     return { error: "로그인이 필요합니다." };
+  }
+
+  // 직전 호출 시각을 보고 N초 내 재호출을 차단한다. RLS가 자기 행만 보여주므로
+  // 다른 사용자에게는 영향이 없다.
+  const { data: lastRow } = await supabase
+    .from("portfolios")
+    .select("updated_at")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (lastRow?.updated_at) {
+    const elapsed = Date.now() - new Date(lastRow.updated_at).getTime();
+    if (elapsed < ANALYZE_MIN_INTERVAL_MS) {
+      const waitSec = Math.ceil((ANALYZE_MIN_INTERVAL_MS - elapsed) / 1000);
+      return { error: `잠시 후 다시 시도해주세요. (${waitSec}초)` };
+    }
   }
 
   let summary: string;
