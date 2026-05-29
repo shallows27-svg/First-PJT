@@ -110,6 +110,23 @@ export function HoldingsReviewTable({
     setSelectedIdxs(new Set());
   };
 
+  // 예수금/현금 행 추가. current_price=1로 두고 quantity 칸에 금액을 그대로 입력하면
+  // value_krw가 자연스럽게 금액 = quantity × 1이 된다. ticker가 비어 있으니 [시세 갱신]에서 skip.
+  const addCashRow = () => {
+    setItems((prev) => [
+      ...prev,
+      {
+        ticker: null,
+        name: "현금",
+        quantity: 0,
+        current_price: 1,
+        value_krw: 0,
+        region: "Cash",
+      },
+    ]);
+    setSelectedIdxs(new Set());
+  };
+
   const toggleSelected = (idx: number) =>
     setSelectedIdxs((prev) => {
       const next = new Set(prev);
@@ -214,9 +231,9 @@ export function HoldingsReviewTable({
         <div>
           총평가 <strong>{formatKrw(alloc.total_krw)}원</strong>
           {" · "}종목 <strong>{items.length}</strong>
-          {" · "}KR {alloc.by_region.KR.toFixed(0)}% · US{" "}
-          {alloc.by_region.US.toFixed(0)}% · GLOBAL{" "}
-          {alloc.by_region.GLOBAL.toFixed(0)}%
+          {" · "}KR {alloc.by_region.KR.toFixed(0)}% · GL/US{" "}
+          {alloc.by_region["GL/US"].toFixed(0)}% · Cash{" "}
+          {alloc.by_region.Cash.toFixed(0)}%
         </div>
         {extraActions}
       </div>
@@ -339,6 +356,15 @@ export function HoldingsReviewTable({
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={addBlankRow}>
             + 행 직접 추가
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addCashRow}
+            title="예수금/현금 행을 추가합니다. 수량 칸에 금액(원)을 그대로 입력하세요."
+          >
+            + 현금
           </Button>
           <Button
             type="button"

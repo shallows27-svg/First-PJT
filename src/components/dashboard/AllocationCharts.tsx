@@ -10,9 +10,9 @@ const ITEM_COLORS = [
   "#06b6d4", "#84cc16", "#ec4899", "#14b8a6", "#f97316",
 ];
 const REGION_COLORS: Record<Region, string> = {
-  KR: "#3b82f6",
-  US: "#22c55e",
-  GLOBAL: "#a855f7",
+  KR: "#3b82f6",      // blue
+  "GL/US": "#22c55e", // green (해외 노출 통합)
+  Cash: "#71717a",    // zinc (중립)
 };
 
 const formatKrw = (n: number) =>

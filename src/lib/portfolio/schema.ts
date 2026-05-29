@@ -1,7 +1,9 @@
 // src/lib/portfolio/schema.ts
 import { z } from "zod";
 
-export const REGION_VALUES = ["KR", "US", "GLOBAL"] as const;
+// 분류 단순화: 해외 노출(미국·중국·일본·인도·선진국 ETF 등)은 'GL/US' 버킷에 통합,
+// 예수금/현금은 별도 Cash 버킷. 레거시 'US'/'GLOBAL' 데이터는 coerceHoldingItem에서 GL/US로 마이그레이션.
+export const REGION_VALUES = ["KR", "GL/US", "Cash"] as const;
 export type Region = (typeof REGION_VALUES)[number];
 
 // 비전 추출 결과: value_krw 없음. 서버에서 quantity × current_price로 계산해서 채운다.

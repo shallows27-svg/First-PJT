@@ -29,10 +29,14 @@ export function coerceHoldingItem(raw: unknown): HoldingItem | null {
         : 0;
   const ticker = typeof r.ticker === "string" ? r.ticker : null;
   const name = typeof r.name === "string" ? r.name : "";
-  const region =
-    r.region === "US" || r.region === "GLOBAL" || r.region === "KR"
-      ? r.region
-      : "KR";
+  // 레거시 'US' / 'GLOBAL'은 모두 'GL/US'로 흡수. KR·Cash는 그대로.
+  const rawRegion = r.region;
+  const region: Region =
+    rawRegion === "GL/US" || rawRegion === "US" || rawRegion === "GLOBAL"
+      ? "GL/US"
+      : rawRegion === "KR" || rawRegion === "Cash"
+        ? rawRegion
+        : "KR";
   if (!name) return null;
   return withComputedValue({
     ticker,
@@ -86,12 +90,12 @@ export function mergeHoldings(
 }
 
 // LLM region 추정이 ticker 패턴과 명백히 충돌하면 보정.
-// 알파벳 1~5자 ticker(AAPL, TSLA 등)인데 region이 KR로 잘못 분류된 경우만 US로 교정.
+// 알파벳 1~5자 ticker(AAPL, TSLA 등)인데 region이 KR로 잘못 분류된 경우만 GL/US로 교정.
 export function correctRegion(item: HoldingItem): HoldingItem {
   if (!item.ticker) return item;
   const isUsTicker = /^[A-Z]{1,5}$/.test(item.ticker);
   if (isUsTicker && item.region === "KR") {
-    return { ...item, region: "US" };
+    return { ...item, region: "GL/US" };
   }
   return item;
 }
@@ -109,7 +113,7 @@ export function computeAllocation(items: HoldingItem[]): Allocation {
     item,
     pct: (item.value_krw / safe) * 100,
   }));
-  const by_region: Record<Region, number> = { KR: 0, US: 0, GLOBAL: 0 };
+  const by_region: Record<Region, number> = { KR: 0, "GL/US": 0, Cash: 0 };
   for (const item of items) {
     by_region[item.region] += (item.value_krw / safe) * 100;
   }
@@ -130,6 +134,6 @@ export function formatPortfolioForSummary(items: HoldingItem[]): string {
     `총평가: ${formatKrw(alloc.total_krw)}원`,
     `종목수: ${items.length}`,
     `상위3: ${top3 || "없음"}`,
-    `지역: KR ${alloc.by_region.KR.toFixed(0)}% / US ${alloc.by_region.US.toFixed(0)}% / GLOBAL ${alloc.by_region.GLOBAL.toFixed(0)}%`,
+    `지역: KR ${alloc.by_region.KR.toFixed(0)}% / GL·US ${alloc.by_region["GL/US"].toFixed(0)}% / Cash ${alloc.by_region.Cash.toFixed(0)}%`,
   ].join("\n");
 }
