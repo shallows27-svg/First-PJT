@@ -8,7 +8,8 @@ import {
   HoldingItemSchema,
   type HoldingItem,
 } from "@/lib/portfolio/schema";
-import { correctRegion, mergeHoldings } from "@/lib/portfolio/holdings";
+import { correctRegion, mergeHoldings, withComputedValue } from "@/lib/portfolio/holdings";
+import { fetchQuotesBulk } from "@/lib/quotes/yahoo";
 import {
   incrementVisionCall,
   rollbackVisionCall,
@@ -151,7 +152,9 @@ export async function analyzeScreenshots(
 
 export type SaveState = { ok: true } | { ok: false; error: string };
 
-const SAVE_DEBOUNCE_MS = 30_000;
+// 저장은 AI 요약 호출(1회)을 동반하므로 비용 가드용 짧은 디바운스만 둔다.
+// 30초는 "저장→검토→수정→재저장"의 자연 워크플로를 막아 너무 빡빡했음(실측).
+const SAVE_DEBOUNCE_MS = 10_000;
 
 export async function savePortfolio(items: HoldingItem[]): Promise<SaveState> {
   const supabase = await createClient();
@@ -164,7 +167,9 @@ export async function savePortfolio(items: HoldingItem[]): Promise<SaveState> {
   let validated: HoldingItem[];
   try {
     const parsed = z.array(HoldingItemSchema).max(100).parse(items);
-    const corrected = parsed.map(correctRegion);
+    // 1) region 보정 → 2) value_krw 재계산 (client에서 보낸 값 신뢰 X, 항상 qty×price)
+    // → 3) 같은 종목 합산 (내부에서 또 withComputedValue 통과)
+    const corrected = parsed.map(correctRegion).map(withComputedValue);
     validated = mergeHoldings([], corrected).merged;
   } catch {
     return { ok: false, error: "보유종목 데이터가 올바르지 않습니다." };
@@ -207,6 +212,13 @@ export async function savePortfolio(items: HoldingItem[]): Promise<SaveState> {
   );
 
   if (error) {
+    // 원인 진단을 위해 서버 로그에만 상세 출력. 클라이언트엔 일반 메시지.
+    console.error("[savePortfolio] DB upsert 실패:", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
     return {
       ok: false,
       error: "저장에 실패했습니다. 잠시 후 다시 시도해주세요.",
@@ -258,4 +270,36 @@ export async function regenerateSummary(): Promise<SaveState> {
 
   revalidatePath("/dashboard");
   return { ok: true };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 신규: Yahoo Finance에서 시세를 끌어와 ticker별 KRW 가격을 반환.
+// 클라이언트가 받아서 검수 표의 current_price를 갱신한다 (저장 X).
+// ────────────────────────────────────────────────────────────────────────────
+
+export type QuoteState =
+  | { ok: true; quotes: Record<string, number>; failed: string[] }
+  | { ok: false; error: string };
+
+export async function refreshQuotes(tickers: string[]): Promise<QuoteState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  const cleaned = tickers.map((t) => t.trim()).filter(Boolean);
+  if (cleaned.length === 0) return { ok: true, quotes: {}, failed: [] };
+  if (cleaned.length > 50) {
+    return { ok: false, error: "한 번에 최대 50종목까지 갱신할 수 있습니다." };
+  }
+
+  const results = await fetchQuotesBulk(cleaned);
+  const quotes: Record<string, number> = {};
+  const failed: string[] = [];
+  for (const r of results) {
+    if (r.ok) quotes[r.ticker] = r.price_krw;
+    else failed.push(r.ticker);
+  }
+  return { ok: true, quotes, failed };
 }
