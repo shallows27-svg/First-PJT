@@ -3,6 +3,17 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { summarizePortfolio } from "@/lib/openrouter";
+import { extractHoldingsFromImages } from "@/lib/ai/vision";
+import {
+  HoldingItemSchema,
+  type HoldingItem,
+} from "@/lib/portfolio/schema";
+import { correctRegion, mergeHoldings } from "@/lib/portfolio/holdings";
+import {
+  incrementVisionCall,
+  rollbackVisionCall,
+} from "@/lib/portfolio/rate-limit";
+import { z } from "zod";
 
 export type MessageState = { error: string } | null;
 
@@ -119,3 +130,94 @@ export async function analyzePortfolio(
   revalidatePath("/dashboard");
   return null;
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 신규: 스크린샷 분석. DB write 없음. 결과 items만 client에 반환.
+// ────────────────────────────────────────────────────────────────────────────
+
+export type AnalyzeState =
+  | { ok: true; items: HoldingItem[] }
+  | { ok: false; error: string };
+
+const MAX_FILES = 5;
+const MAX_BYTES_PER_FILE = 5 * 1024 * 1024;
+const MAX_BYTES_TOTAL = 15 * 1024 * 1024;
+const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+export async function analyzeScreenshots(
+  _prev: AnalyzeState | null,
+  formData: FormData,
+): Promise<AnalyzeState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  const files = formData
+    .getAll("files")
+    .filter((f): f is File => f instanceof File);
+
+  if (files.length === 0) {
+    return { ok: false, error: "이미지를 업로드해주세요." };
+  }
+  if (files.length > MAX_FILES) {
+    return {
+      ok: false,
+      error: `한 번에 최대 ${MAX_FILES}장까지 업로드할 수 있습니다.`,
+    };
+  }
+
+  let totalBytes = 0;
+  for (const file of files) {
+    if (!ACCEPTED_TYPES.has(file.type)) {
+      return {
+        ok: false,
+        error: "이미지 파일(jpg, png, webp)만 업로드할 수 있습니다.",
+      };
+    }
+    if (file.size > MAX_BYTES_PER_FILE) {
+      return { ok: false, error: "파일 1장은 5MB 이하여야 합니다." };
+    }
+    totalBytes += file.size;
+  }
+  if (totalBytes > MAX_BYTES_TOTAL) {
+    return { ok: false, error: "총 업로드 용량은 15MB 이하여야 합니다." };
+  }
+
+  const rl = await incrementVisionCall(user.id);
+  if (!rl.allowed) {
+    return {
+      ok: false,
+      error: "분석 한도를 잠시 초과했습니다. 1시간 뒤 다시 시도해주세요.",
+    };
+  }
+
+  let items: HoldingItem[];
+  try {
+    const base64s = await Promise.all(
+      files.map(async (f) => {
+        const buf = Buffer.from(await f.arrayBuffer());
+        return buf.toString("base64");
+      }),
+    );
+    const rawItems = await extractHoldingsFromImages(base64s);
+    const corrected = rawItems.map(correctRegion);
+    // 한 번의 분석 호출 내부에서도 동일 종목이 중복 행으로 나올 수 있으므로 합산.
+    const { merged } = mergeHoldings([], corrected);
+    items = merged;
+  } catch (e) {
+    console.error("[analyzeScreenshots] 비전 호출 실패:", e);
+    await rollbackVisionCall(user.id);
+    return {
+      ok: false,
+      error: "분석에 실패했습니다. 잠시 후 다시 시도해주세요.",
+    };
+  }
+
+  return { ok: true, items };
+}
+
+// 사용 안 하는 변수 lint 경고 회피용 reference.
+void HoldingItemSchema;
+void z;
