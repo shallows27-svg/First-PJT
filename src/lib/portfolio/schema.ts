@@ -27,6 +27,8 @@ export type VisionResponse = z.infer<typeof VisionResponseSchema>;
 
 // 저장·UI 단위: value_krw는 quantity × current_price로 항상 일관되게 채워진다.
 // 입력 시점·수정 시점·서버 저장 시점에서 모두 재계산되므로 drift 없다.
+// type: 사용자 정의 자유 카테고리 (예: "성장", "배당", "테마"). Vision은 채우지 않고
+// 빈 문자열로 시작 — 검수 단계에서 사용자가 분류한다. 차트에선 빈 값은 "미분류" 버킷.
 export const HoldingItemSchema = z.object({
   ticker: z.string().min(1).max(20).nullable(),
   name: z.string().min(1).max(50),
@@ -34,6 +36,7 @@ export const HoldingItemSchema = z.object({
   current_price: z.number().nonnegative().finite(),
   value_krw: z.number().nonnegative().finite(),
   region: z.enum(REGION_VALUES),
+  type: z.preprocess((v) => v ?? "", z.string().max(30).default("")),
 });
 export type HoldingItem = z.infer<typeof HoldingItemSchema>;
 
