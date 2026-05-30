@@ -16,7 +16,7 @@ export function AiSummaryView({ summary }: { summary: string }) {
   const onRegenerate = () => {
     startTransition(async () => {
       const res = await regenerateSummary();
-      if (res.ok) toast.success("요약을 다시 생성했습니다.");
+      if (res.ok) toast.success("Claude 분석을 다시 생성했습니다.");
       else toast.error(res.error);
     });
   };
@@ -24,7 +24,7 @@ export function AiSummaryView({ summary }: { summary: string }) {
   if (lines.length === 0) {
     return (
       <div className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
-        <p className="text-zinc-500">AI 요약을 생성하지 못했어요.</p>
+        <p className="text-zinc-500">Claude 분석을 생성하지 못했어요.</p>
         <Button
           type="button"
           variant="outline"
@@ -33,7 +33,7 @@ export function AiSummaryView({ summary }: { summary: string }) {
           onClick={onRegenerate}
           disabled={isPending}
         >
-          {isPending ? "생성 중…" : "요약 다시 생성"}
+          {isPending ? "생성 중…" : "다시 생성"}
         </Button>
       </div>
     );
@@ -41,15 +41,27 @@ export function AiSummaryView({ summary }: { summary: string }) {
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h3 className="text-xs font-semibold text-zinc-700">AI 3줄 요약</h3>
-      <ul className="mt-2 space-y-1 text-sm text-zinc-700">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold text-zinc-700">Claude 요약 + 조언</h3>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={onRegenerate}
+          disabled={isPending}
+        >
+          {isPending ? "생성 중…" : "다시 생성"}
+        </Button>
+      </div>
+      <ul className="mt-2 space-y-1 text-sm leading-relaxed text-zinc-700">
         {lines.map((line, i) => (
           <li key={i}>• {line}</li>
         ))}
       </ul>
       <p className="mt-3 text-xs text-zinc-400">
-        분석을 위해 OpenRouter(Google Gemini)에 사전 집계된 통계만 전송됩니다.
-        투자 자문이 아닙니다.
+        분석을 위해 OpenRouter(Anthropic Claude)에 사전 집계된 통계만 전송됩니다.
+        일반적 관찰이며 투자 자문이 아닙니다.
       </p>
     </div>
   );
