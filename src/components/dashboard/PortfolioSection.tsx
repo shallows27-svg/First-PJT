@@ -1,7 +1,7 @@
 // src/components/dashboard/PortfolioSection.tsx
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { mergeHoldings } from "@/lib/portfolio/holdings";
@@ -27,6 +27,19 @@ export function PortfolioSection({ savedItems, savedSummary }: Props) {
   const [reviewItems, setReviewItems] = useState<HoldingItem[]>([]);
   const [pendingMerge, setPendingMerge] = useState<HoldingItem[] | null>(null);
   const [isAnalyzing, startAnalyzing] = useTransition();
+  const [presentation, setPresentation] = useState(false);
+
+  useEffect(() => {
+    setPresentation(localStorage.getItem("portfolio.presentation") === "1");
+  }, []);
+
+  const togglePresentation = () => {
+    setPresentation((prev) => {
+      const next = !prev;
+      localStorage.setItem("portfolio.presentation", next ? "1" : "0");
+      return next;
+    });
+  };
 
   const analyze = (files: File[]) => {
     const fd = new FormData();
@@ -114,22 +127,34 @@ export function PortfolioSection({ savedItems, savedSummary }: Props) {
     <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-6">
       <header className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-zinc-900">포트폴리오</h2>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8"
-          onClick={() => {
-            setReviewItems(savedItems);
-            setMode("reviewing");
-          }}
-        >
-          수정
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant={presentation ? "default" : "outline"}
+            size="sm"
+            className="h-8"
+            onClick={togglePresentation}
+            title="금액·수량을 숨기고 비중만 표시"
+          >
+            {presentation ? "공유 모드 ON" : "공유 모드"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8"
+            onClick={() => {
+              setReviewItems(savedItems);
+              setMode("reviewing");
+            }}
+          >
+            수정
+          </Button>
+        </div>
       </header>
-      <AllocationCharts items={savedItems} />
-      <HoldingsView items={savedItems} />
-      <AiSummaryView summary={savedSummary} />
+      <AllocationCharts items={savedItems} presentation={presentation} />
+      <HoldingsView items={savedItems} presentation={presentation} />
+      {!presentation && <AiSummaryView summary={savedSummary} />}
     </section>
   );
 }

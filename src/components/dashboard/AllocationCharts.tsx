@@ -18,7 +18,13 @@ const REGION_COLORS: Record<Region, string> = {
 const formatKrw = (n: number) =>
   `${new Intl.NumberFormat("ko-KR").format(Math.round(n))}원`;
 
-export function AllocationCharts({ items }: { items: HoldingItem[] }) {
+export function AllocationCharts({
+  items,
+  presentation = false,
+}: {
+  items: HoldingItem[];
+  presentation?: boolean;
+}) {
   const alloc = computeAllocation(items);
   const itemData = alloc.by_item.map((r, idx) => ({
     name: r.item.name,
@@ -53,14 +59,20 @@ export function AllocationCharts({ items }: { items: HoldingItem[] }) {
             </Pie>
             <Tooltip
               formatter={(v, _n, p) =>
-                [`${formatKrw(Number(v))} (${(p.payload as { pct: number }).pct.toFixed(1)}%)`, (p.payload as { name: string }).name]
+                presentation
+                  ? [`${(p.payload as { pct: number }).pct.toFixed(1)}%`, (p.payload as { name: string }).name]
+                  : [`${formatKrw(Number(v))} (${(p.payload as { pct: number }).pct.toFixed(1)}%)`, (p.payload as { name: string }).name]
               }
             />
           </PieChart>
         </ResponsiveContainer>
         <AccessibilityTable
-          headers={["종목", "평가금액", "비중"]}
-          rows={itemData.map((d) => [d.name, formatKrw(d.value), `${d.pct.toFixed(1)}%`])}
+          headers={presentation ? ["종목", "비중"] : ["종목", "평가금액", "비중"]}
+          rows={itemData.map((d) =>
+            presentation
+              ? [d.name, `${d.pct.toFixed(1)}%`]
+              : [d.name, formatKrw(d.value), `${d.pct.toFixed(1)}%`],
+          )}
         />
       </ChartCard>
 

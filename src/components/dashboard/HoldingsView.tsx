@@ -5,7 +5,13 @@ import { computeAllocation } from "@/lib/portfolio/holdings";
 const formatKrw = (n: number) =>
   new Intl.NumberFormat("ko-KR").format(Math.round(n));
 
-export function HoldingsView({ items }: { items: HoldingItem[] }) {
+export function HoldingsView({
+  items,
+  presentation = false,
+}: {
+  items: HoldingItem[];
+  presentation?: boolean;
+}) {
   const alloc = computeAllocation(items);
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -13,9 +19,11 @@ export function HoldingsView({ items }: { items: HoldingItem[] }) {
         <thead className="bg-zinc-50 text-left text-xs text-zinc-500">
           <tr>
             <th className="px-3 py-2">종목</th>
-            <th className="px-3 py-2 text-right">수량</th>
-            <th className="px-3 py-2 text-right">현재가</th>
-            <th className="px-3 py-2 text-right">평가금액</th>
+            {!presentation && <th className="px-3 py-2 text-right">수량</th>}
+            {!presentation && <th className="px-3 py-2 text-right">현재가</th>}
+            {!presentation && (
+              <th className="px-3 py-2 text-right">평가금액</th>
+            )}
             <th className="px-3 py-2 text-right">비중</th>
             <th className="px-3 py-2">지역</th>
           </tr>
@@ -33,15 +41,21 @@ export function HoldingsView({ items }: { items: HoldingItem[] }) {
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-700">
-                  {r.item.quantity}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-700">
-                  {formatKrw(r.item.current_price)}원
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-700">
-                  {formatKrw(r.item.value_krw)}원
-                </td>
+                {!presentation && (
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-700">
+                    {r.item.quantity}
+                  </td>
+                )}
+                {!presentation && (
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-700">
+                    {formatKrw(r.item.current_price)}원
+                  </td>
+                )}
+                {!presentation && (
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-700">
+                    {formatKrw(r.item.value_krw)}원
+                  </td>
+                )}
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-900">
                   {r.pct.toFixed(1)}%
                 </td>
@@ -52,16 +66,24 @@ export function HoldingsView({ items }: { items: HoldingItem[] }) {
             ))}
         </tbody>
         <tfoot className="bg-zinc-50 text-xs font-semibold text-zinc-700">
-          <tr>
-            <td className="px-3 py-2" colSpan={3}>
-              합계 ({items.length}개 종목)
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-              {formatKrw(alloc.total_krw)}원
-            </td>
-            <td className="px-3 py-2 text-right">100.0%</td>
-            <td className="px-3 py-2" />
-          </tr>
+          {presentation ? (
+            <tr>
+              <td className="px-3 py-2">합계 ({items.length}개 종목)</td>
+              <td className="px-3 py-2 text-right">100.0%</td>
+              <td className="px-3 py-2" />
+            </tr>
+          ) : (
+            <tr>
+              <td className="px-3 py-2" colSpan={3}>
+                합계 ({items.length}개 종목)
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {formatKrw(alloc.total_krw)}원
+              </td>
+              <td className="px-3 py-2 text-right">100.0%</td>
+              <td className="px-3 py-2" />
+            </tr>
+          )}
         </tfoot>
       </table>
     </div>
