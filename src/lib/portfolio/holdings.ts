@@ -11,6 +11,8 @@ export function withComputedValue(item: HoldingItem | VisionItem): HoldingItem {
     current_price: item.current_price,
     region: item.region,
     value_krw: item.quantity * item.current_price,
+    // VisionItem에는 type이 없음 — 새로 들어오는 행은 빈 문자열로 시작.
+    type: "type" in item && typeof item.type === "string" ? item.type : "",
   };
 }
 
@@ -37,6 +39,8 @@ export function coerceHoldingItem(raw: unknown): HoldingItem | null {
       : rawRegion === "KR" || rawRegion === "Cash"
         ? rawRegion
         : "KR";
+  // 레거시 행에는 type 필드가 없음 — 빈 문자열로 채우면 "미분류" 버킷으로 잡힌다.
+  const type = typeof r.type === "string" ? r.type : "";
   if (!name) return null;
   return withComputedValue({
     ticker,
@@ -45,6 +49,7 @@ export function coerceHoldingItem(raw: unknown): HoldingItem | null {
     current_price,
     region,
     value_krw,
+    type,
   });
 }
 
@@ -104,7 +109,11 @@ export type Allocation = {
   total_krw: number;
   by_item: Array<{ item: HoldingItem; pct: number }>;
   by_region: Record<Region, number>;
+  // 사용자 정의 type 별 집계. 빈 type은 "미분류" 키로 묶임. 비중 내림차순.
+  by_type: Array<{ type: string; value_krw: number; pct: number }>;
 };
+
+export const UNCLASSIFIED_TYPE = "미분류";
 
 export function computeAllocation(items: HoldingItem[]): Allocation {
   const total = items.reduce((sum, h) => sum + h.value_krw, 0);
@@ -117,7 +126,19 @@ export function computeAllocation(items: HoldingItem[]): Allocation {
   for (const item of items) {
     by_region[item.region] += (item.value_krw / safe) * 100;
   }
-  return { total_krw: total, by_item, by_region };
+  const typeMap = new Map<string, number>();
+  for (const item of items) {
+    const key = item.type?.trim() || UNCLASSIFIED_TYPE;
+    typeMap.set(key, (typeMap.get(key) ?? 0) + item.value_krw);
+  }
+  const by_type = Array.from(typeMap.entries())
+    .map(([type, value_krw]) => ({
+      type,
+      value_krw,
+      pct: (value_krw / safe) * 100,
+    }))
+    .sort((a, b) => b.value_krw - a.value_krw);
+  return { total_krw: total, by_item, by_region, by_type };
 }
 
 // 요약 호출에 넘길 사전 집계 텍스트. raw JSON 대신 사람이 읽는 요약을 전달해 토큰 절감 + 일관성 확보.

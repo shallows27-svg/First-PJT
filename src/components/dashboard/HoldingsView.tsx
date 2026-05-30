@@ -26,6 +26,7 @@ export function HoldingsView({
             )}
             <th className="px-3 py-2 text-right">비중</th>
             <th className="px-3 py-2">지역</th>
+            <th className="px-3 py-2">타입</th>
           </tr>
         </thead>
         <tbody>
@@ -62,6 +63,11 @@ export function HoldingsView({
                 <td className="px-3 py-2 text-xs text-zinc-500">
                   {r.item.region}
                 </td>
+                <td className="px-3 py-2 text-xs text-zinc-500">
+                  {r.item.type || (
+                    <span className="text-zinc-300">—</span>
+                  )}
+                </td>
               </tr>
             ))}
         </tbody>
@@ -70,6 +76,7 @@ export function HoldingsView({
             <tr>
               <td className="px-3 py-2">합계 ({items.length}개 종목)</td>
               <td className="px-3 py-2 text-right">100.0%</td>
+              <td className="px-3 py-2" />
               <td className="px-3 py-2" />
             </tr>
           ) : (
@@ -81,6 +88,7 @@ export function HoldingsView({
                 {formatKrw(alloc.total_krw)}원
               </td>
               <td className="px-3 py-2 text-right">100.0%</td>
+              <td className="px-3 py-2" />
               <td className="px-3 py-2" />
             </tr>
           )}

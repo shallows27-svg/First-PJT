@@ -83,6 +83,15 @@ export function HoldingsReviewTable({
   }, []);
 
   const alloc = useMemo(() => computeAllocation(items), [items]);
+  // Type autocomplete: 표 안에 이미 입력된 type 목록 (중복 제거, 빈 값 제외)
+  const knownTypes = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of items) {
+      const t = it.type?.trim();
+      if (t) set.add(t);
+    }
+    return Array.from(set).sort();
+  }, [items]);
 
   const updateRow = (idx: number, patch: Partial<HoldingItem>) =>
     setItems((prev) =>
@@ -105,6 +114,7 @@ export function HoldingsReviewTable({
         current_price: 0,
         value_krw: 0,
         region: "KR",
+        type: "",
       },
     ]);
     setSelectedIdxs(new Set());
@@ -122,6 +132,7 @@ export function HoldingsReviewTable({
         current_price: 1,
         value_krw: 0,
         region: "Cash",
+        type: "현금",
       },
     ]);
     setSelectedIdxs(new Set());
@@ -238,6 +249,12 @@ export function HoldingsReviewTable({
         {extraActions}
       </div>
 
+      <datalist id="holdings-type-suggestions">
+        {knownTypes.map((t) => (
+          <option key={t} value={t} />
+        ))}
+      </datalist>
+
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
         <table className="w-full text-sm">
           <thead className="bg-zinc-50 text-left text-xs text-zinc-500">
@@ -248,6 +265,7 @@ export function HoldingsReviewTable({
               <th className="px-2 py-2 text-right">현재가(원)</th>
               <th className="px-2 py-2 text-right">평가금액(원)</th>
               <th className="px-2 py-2">지역</th>
+              <th className="px-2 py-2">타입</th>
               <th className="px-2 py-2 text-right">비중</th>
               <th className="w-8" />
             </tr>
@@ -273,7 +291,7 @@ export function HoldingsReviewTable({
                     />
                   </td>
                   <td className="px-2 py-1">
-                    <NameInput
+                    <IMEInput
                       value={it.name}
                       onCommit={(v) => updateRow(idx, { name: v })}
                     />
@@ -331,6 +349,15 @@ export function HoldingsReviewTable({
                         </option>
                       ))}
                     </select>
+                  </td>
+                  <td className="px-2 py-1">
+                    <IMEInput
+                      value={it.type}
+                      onCommit={(v) => updateRow(idx, { type: v.trim() })}
+                      list="holdings-type-suggestions"
+                      placeholder="예: 성장"
+                      className="h-8 w-24 text-xs"
+                    />
                   </td>
                   <td className="px-2 py-1 text-right tabular-nums text-zinc-700">
                     {pct.toFixed(1)}%
@@ -432,12 +459,18 @@ function rowKey(it: HoldingItem): string {
 // 한글 IME(조합형) 안전 입력. composition 중에는 부모 state 갱신을 지연시켜
 // 매 키 입력마다 controlled value 재적용이 IME 조합을 깨뜨리는 문제를 막는다.
 // 외부에서 value가 바뀌면 (예: 합치기 후) 조합 중이 아닐 때만 동기화한다.
-function NameInput({
+// 종목명, 타입 등 한글 입력이 필요한 모든 필드에서 재사용.
+function IMEInput({
   value,
   onCommit,
+  className = "h-8",
+  ...rest
 }: {
   value: string;
   onCommit: (v: string) => void;
+  className?: string;
+  placeholder?: string;
+  list?: string;
 }) {
   const [local, setLocal] = useState(value);
   const isComposingRef = useRef(false);
@@ -467,7 +500,8 @@ function NameInput({
         // 안전망: composition 이벤트가 어떤 환경에서 누락될 경우 blur 시 강제 커밋.
         if (local !== value) onCommit(local);
       }}
-      className="h-8"
+      className={className}
+      {...rest}
     />
   );
 }

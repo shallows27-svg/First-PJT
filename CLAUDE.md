@@ -41,7 +41,7 @@ Copy `.env.example` → `.env.local` in `1일차/portfolio-xray/`. Required:
 
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — used by both browser (`src/lib/supabase/client.ts`) and server (`src/lib/supabase/server.ts`, `src/lib/supabase/proxy.ts`) clients.
 - `OPENROUTER_API_KEY` (server-only, never prefix with `NEXT_PUBLIC_`).
-- `OPENROUTER_MODEL` (text summary, defaults to `google/gemini-3-flash-preview`).
+- `OPENROUTER_MODEL` (portfolio summary + advice, defaults to `anthropic/claude-haiku-4-5`).
 - `OPENROUTER_VISION_MODEL` (screenshot OCR, defaults to `google/gemini-2.5-flash`).
 
 ## Architecture

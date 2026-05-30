@@ -39,9 +39,16 @@ export function AllocationCharts({
       color: REGION_COLORS[region],
     }))
     .filter((r) => r.value > 0);
+  // 타입은 사용자 정의라 미리 정해진 색이 없음 — 팔레트 순환. "미분류"는 시각적으로 약하게 zinc.
+  const typeData = alloc.by_type.map((r, idx) => ({
+    name: r.type,
+    value: r.value_krw,
+    pct: r.pct,
+    color: r.type === "미분류" ? "#a1a1aa" : ITEM_COLORS[idx % ITEM_COLORS.length],
+  }));
 
   return (
-    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
       <ChartCard title="종목별 비중">
         <ResponsiveContainer width="100%" height={220}>
           <PieChart>
@@ -101,6 +108,40 @@ export function AllocationCharts({
         <AccessibilityTable
           headers={["지역", "비중"]}
           rows={regionData.map((d) => [d.name, `${d.value.toFixed(1)}%`])}
+        />
+      </ChartCard>
+
+      <ChartCard title="타입별 비중">
+        <ResponsiveContainer width="100%" height={220}>
+          <PieChart>
+            <Pie
+              data={typeData}
+              dataKey="value"
+              nameKey="name"
+              innerRadius={50}
+              outerRadius={80}
+              paddingAngle={1}
+            >
+              {typeData.map((d) => (
+                <Cell key={d.name} fill={d.color} />
+              ))}
+            </Pie>
+            <Tooltip
+              formatter={(v, _n, p) =>
+                presentation
+                  ? [`${(p.payload as { pct: number }).pct.toFixed(1)}%`, (p.payload as { name: string }).name]
+                  : [`${formatKrw(Number(v))} (${(p.payload as { pct: number }).pct.toFixed(1)}%)`, (p.payload as { name: string }).name]
+              }
+            />
+          </PieChart>
+        </ResponsiveContainer>
+        <AccessibilityTable
+          headers={presentation ? ["타입", "비중"] : ["타입", "평가금액", "비중"]}
+          rows={typeData.map((d) =>
+            presentation
+              ? [d.name, `${d.pct.toFixed(1)}%`]
+              : [d.name, formatKrw(d.value), `${d.pct.toFixed(1)}%`],
+          )}
         />
       </ChartCard>
     </div>
