@@ -2,7 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { summarizePortfolio } from "@/lib/openrouter";
+import { summarizePortfolioFromItems } from "@/lib/ai/summary";
+import { extractHoldingsFromImages } from "@/lib/ai/vision";
+import {
+  HoldingItemSchema,
+  type HoldingItem,
+} from "@/lib/portfolio/schema";
+import { correctRegion, mergeHoldings, withComputedValue } from "@/lib/portfolio/holdings";
+import { fetchQuotesBulk } from "@/lib/quotes/yahoo";
+import {
+  incrementVisionCall,
+  rollbackVisionCall,
+} from "@/lib/portfolio/rate-limit";
+import { z } from "zod";
 
 export type MessageState = { error: string } | null;
 
@@ -47,54 +59,247 @@ export async function saveMessage(
   return null;
 }
 
-export type PortfolioState = { error: string } | null;
+// ────────────────────────────────────────────────────────────────────────────
+// 신규: 스크린샷 분석. DB write 없음. 결과 items만 client에 반환.
+// ────────────────────────────────────────────────────────────────────────────
 
-export async function analyzePortfolio(
-  _prev: PortfolioState,
+export type AnalyzeState =
+  | { ok: true; items: HoldingItem[] }
+  | { ok: false; error: string };
+
+const MAX_FILES = 5;
+const MAX_BYTES_PER_FILE = 5 * 1024 * 1024;
+const MAX_BYTES_TOTAL = 15 * 1024 * 1024;
+const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+export async function analyzeScreenshots(
+  _prev: AnalyzeState | null,
   formData: FormData,
-): Promise<PortfolioState> {
-  const holdings = String(formData.get("holdings") ?? "").trim();
-  if (!holdings) {
-    return { error: "보유 종목을 입력해주세요." };
-  }
-  if (holdings.length > 4000) {
-    return { error: "입력이 너무 깁니다. 4000자 이내로 입력해주세요." };
-  }
-
+): Promise<AnalyzeState> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
 
-  // 서버 액션은 폼 외에 직접 POST로도 호출될 수 있으므로 인증을 반드시 재확인.
-  if (!user) {
-    return { error: "로그인이 필요합니다." };
+  const files = formData
+    .getAll("files")
+    .filter((f): f is File => f instanceof File);
+
+  if (files.length === 0) {
+    return { ok: false, error: "이미지를 업로드해주세요." };
+  }
+  if (files.length > MAX_FILES) {
+    return {
+      ok: false,
+      error: `한 번에 최대 ${MAX_FILES}장까지 업로드할 수 있습니다.`,
+    };
   }
 
-  let summary: string;
+  let totalBytes = 0;
+  for (const file of files) {
+    if (!ACCEPTED_TYPES.has(file.type)) {
+      return {
+        ok: false,
+        error: "이미지 파일(jpg, png, webp)만 업로드할 수 있습니다.",
+      };
+    }
+    if (file.size > MAX_BYTES_PER_FILE) {
+      return { ok: false, error: "파일 1장은 5MB 이하여야 합니다." };
+    }
+    totalBytes += file.size;
+  }
+  if (totalBytes > MAX_BYTES_TOTAL) {
+    return { ok: false, error: "총 업로드 용량은 15MB 이하여야 합니다." };
+  }
+
+  const rl = await incrementVisionCall(user.id);
+  if (!rl.allowed) {
+    return {
+      ok: false,
+      error: "분석 한도를 잠시 초과했습니다. 1시간 뒤 다시 시도해주세요.",
+    };
+  }
+
+  let items: HoldingItem[];
   try {
-    summary = await summarizePortfolio(holdings);
+    const base64s = await Promise.all(
+      files.map(async (f) => {
+        const buf = Buffer.from(await f.arrayBuffer());
+        return buf.toString("base64");
+      }),
+    );
+    const rawItems = await extractHoldingsFromImages(base64s);
+    const corrected = rawItems.map(correctRegion);
+    // 한 번의 분석 호출 내부에서도 동일 종목이 중복 행으로 나올 수 있으므로 합산.
+    const { merged } = mergeHoldings([], corrected);
+    items = merged;
   } catch (e) {
-    // 원인은 서버 콘솔에만 — 키/요청 본문은 openrouter.ts에서 이미 제외됨.
-    console.error("[analyzePortfolio] AI 요약 실패:", e);
-    return { error: "AI 분석에 실패했습니다. 잠시 후 다시 시도해주세요." };
+    console.error("[analyzeScreenshots] 비전 호출 실패:", e);
+    await rollbackVisionCall(user.id);
+    return {
+      ok: false,
+      error: "분석에 실패했습니다. 잠시 후 다시 시도해주세요.",
+    };
   }
 
-  // 사용자당 한 행만 유지 — user_id 충돌 시 기존 포트폴리오/요약을 덮어쓴다.
+  return { ok: true, items };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 신규: 저장 + 요약. DB write + ai_summary 생성.
+// ────────────────────────────────────────────────────────────────────────────
+
+export type SaveState = { ok: true } | { ok: false; error: string };
+
+// 저장은 AI 요약 호출(1회)을 동반하므로 비용 가드용 짧은 디바운스만 둔다.
+// 30초는 "저장→검토→수정→재저장"의 자연 워크플로를 막아 너무 빡빡했음(실측).
+const SAVE_DEBOUNCE_MS = 10_000;
+
+export async function savePortfolio(items: HoldingItem[]): Promise<SaveState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  // 방어적 재검증. client state는 신뢰 X.
+  let validated: HoldingItem[];
+  try {
+    const parsed = z.array(HoldingItemSchema).max(100).parse(items);
+    // 1) region 보정 → 2) value_krw 재계산 (client에서 보낸 값 신뢰 X, 항상 qty×price)
+    // → 3) 같은 종목 합산 (내부에서 또 withComputedValue 통과)
+    const corrected = parsed.map(correctRegion).map(withComputedValue);
+    validated = mergeHoldings([], corrected).merged;
+  } catch {
+    return { ok: false, error: "보유종목 데이터가 올바르지 않습니다." };
+  }
+  if (validated.length === 0) {
+    return { ok: false, error: "저장할 보유종목이 없습니다." };
+  }
+
+  // 30초 디바운스: 직전 저장 후 짧은 시간 내 재호출 차단.
+  const { data: lastRow } = await supabase
+    .from("portfolios")
+    .select("updated_at")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (lastRow?.updated_at) {
+    const elapsed = Date.now() - new Date(lastRow.updated_at).getTime();
+    if (elapsed < SAVE_DEBOUNCE_MS) {
+      const wait = Math.ceil((SAVE_DEBOUNCE_MS - elapsed) / 1000);
+      return { ok: false, error: `잠시 후 다시 시도해주세요. (${wait}초)` };
+    }
+  }
+
+  // 요약 실패는 fatal 아님 — 빈 문자열로 저장 후 사용자가 [요약 다시 생성] 트리거.
+  let aiSummary = "";
+  try {
+    aiSummary = await summarizePortfolioFromItems(validated);
+  } catch (e) {
+    console.error("[savePortfolio] 요약 호출 실패:", e);
+  }
+
   const { error } = await supabase.from("portfolios").upsert(
     {
       user_id: user.id,
-      holdings,
-      ai_summary: summary,
+      holdings_items: validated,
+      ai_summary: aiSummary,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" },
   );
 
   if (error) {
-    return { error: "저장에 실패했습니다. 잠시 후 다시 시도해주세요." };
+    // 원인 진단을 위해 서버 로그에만 상세 출력. 클라이언트엔 일반 메시지.
+    console.error("[savePortfolio] DB upsert 실패:", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+    return {
+      ok: false,
+      error: "저장에 실패했습니다. 잠시 후 다시 시도해주세요.",
+    };
   }
 
   revalidatePath("/dashboard");
-  return null;
+  return { ok: true };
+}
+
+// 사용자 수동 트리거: 요약만 다시 생성. holdings_items 는 건드리지 않음.
+export async function regenerateSummary(): Promise<SaveState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  const { data: row } = await supabase
+    .from("portfolios")
+    .select("holdings_items")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const items = (row?.holdings_items ?? []) as HoldingItem[];
+  if (items.length === 0) {
+    return { ok: false, error: "보유종목이 없습니다." };
+  }
+
+  let aiSummary: string;
+  try {
+    aiSummary = await summarizePortfolioFromItems(items);
+  } catch (e) {
+    console.error("[regenerateSummary] 요약 호출 실패:", e);
+    return {
+      ok: false,
+      error: "요약 생성에 실패했습니다. 잠시 후 다시 시도해주세요.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("portfolios")
+    .update({ ai_summary: aiSummary, updated_at: new Date().toISOString() })
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { ok: false, error: "저장에 실패했습니다." };
+  }
+
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 신규: Yahoo Finance에서 시세를 끌어와 ticker별 KRW 가격을 반환.
+// 클라이언트가 받아서 검수 표의 current_price를 갱신한다 (저장 X).
+// ────────────────────────────────────────────────────────────────────────────
+
+export type QuoteState =
+  | { ok: true; quotes: Record<string, number>; failed: string[] }
+  | { ok: false; error: string };
+
+export async function refreshQuotes(tickers: string[]): Promise<QuoteState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  const cleaned = tickers.map((t) => t.trim()).filter(Boolean);
+  if (cleaned.length === 0) return { ok: true, quotes: {}, failed: [] };
+  if (cleaned.length > 50) {
+    return { ok: false, error: "한 번에 최대 50종목까지 갱신할 수 있습니다." };
+  }
+
+  const results = await fetchQuotesBulk(cleaned);
+  const quotes: Record<string, number> = {};
+  const failed: string[] = [];
+  for (const r of results) {
+    if (r.ok) quotes[r.ticker] = r.price_krw;
+    else failed.push(r.ticker);
+  }
+  return { ok: true, quotes, failed };
 }

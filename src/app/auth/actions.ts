@@ -13,6 +13,18 @@ function readCredentials(formData: FormData) {
   return { email, password };
 }
 
+// 이메일 확인 redirect URL은 요청자가 보낸 Origin 헤더에 의존하면 안 된다(위변조 가능).
+// 운영에서는 NEXT_PUBLIC_SITE_URL, 미배포 환경에선 Vercel 자동 주입 변수, 로컬은 origin/3000 폴백.
+function resolveSiteUrl(reqHeaders: Headers): string {
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (explicit) return explicit.replace(/\/$/, "");
+  const vercelProd = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (vercelProd) return `https://${vercelProd}`;
+  const vercelPreview = process.env.VERCEL_URL;
+  if (vercelPreview) return `https://${vercelPreview}`;
+  return reqHeaders.get("origin") ?? "http://localhost:3000";
+}
+
 export async function signIn(
   _prev: AuthState,
   formData: FormData,
@@ -48,18 +60,20 @@ export async function signUp(
     return { error: "비밀번호는 6자 이상이어야 합니다." };
   }
 
-  const origin = (await headers()).get("origin") ?? "";
+  const siteUrl = resolveSiteUrl(await headers());
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: `${origin}/auth/confirm`,
+      emailRedirectTo: `${siteUrl}/auth/confirm`,
     },
   });
 
   if (error) {
-    return { error: `회원가입 실패: ${error.message}` };
+    // 계정 열거 방지를 위해 일반 메시지로 통일. 상세 원인은 서버 콘솔에만.
+    console.error("[signUp] Supabase 회원가입 실패:", error.message);
+    return { error: "회원가입에 실패했습니다. 잠시 후 다시 시도해주세요." };
   }
 
   // 이메일 확인이 켜져 있으면 세션이 바로 생기지 않음 → 안내 페이지로.
